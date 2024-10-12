@@ -31,20 +31,9 @@ void EspCam::Setup()
     config.pin_reset = RESET_GPIO_NUM;
     config.xclk_freq_hz = 20000000;
     config.pixel_format = PIXFORMAT_JPEG;
+    config.jpeg_quality = 50;
 
-    if (psramFound())
-    {
-        // config.frame_size = FRAMESIZE_UXGA;
-        config.jpeg_quality = 10;
-        config.fb_count = 2;
-    }
-    else
-    {
-        // config.frame_size = FRAMESIZE_SVGA;
-        config.jpeg_quality = 12;
-        config.fb_count = 1;
-    }
-
+    config.fb_count = 1;
     config.frame_size = FRAMESIZE_SVGA;
 
     // Camera init
@@ -63,26 +52,10 @@ Photo EspCam::CaptureFrame()
 
     Photo photo;
 
-    if (fb->len > 0)
+    if (fb->len > 100)
     {
-        if (fb->width > 400)
-        {
-            if (fb->format != PIXFORMAT_JPEG)
-            {
-                bool jpeg_converted = frame2jpg(fb, 80, &photo.buffer, &photo.length);
-                esp_camera_fb_return(fb);
-                fb = NULL;
-                if (!jpeg_converted)
-                {
-                    Serial.println("JPEG compression failed");
-                }
-            }
-            else
-            {
-                photo.length = fb->len;
-                photo.buffer = fb->buf;
-            }
-        }
+        photo.length = fb->len;
+        photo.buffer = fb->buf;
     }
 
     esp_camera_fb_return(fb); // must be used to free the memory allocated by esp_camera_fb_get().
