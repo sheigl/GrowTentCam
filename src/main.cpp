@@ -1,19 +1,3 @@
-/*********
-  Rui Santos
-  Complete project details at https://RandomNerdTutorials.com/esp32-cam-video-streaming-web-server-camera-home-assistant/
-
-  IMPORTANT!!!
-   - Select Board "AI Thinker ESP32-CAM"
-   - GPIO 0 must be connected to GND to upload a sketch
-   - After connecting GPIO 0 to GND, press the ESP32-CAM on-board RESET button to put your board in flashing mode
-
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files.
-
-  The above copyright notice and this permission notice shall be included in all
-  copies or substantial portions of the Software.
-*********/
-
 #include <WiFi.h>
 #include "esp_timer.h"
 #include "img_converters.h"
@@ -22,21 +6,18 @@
 #include "soc/soc.h"          //disable brownout problems
 #include "soc/rtc_cntl_reg.h" //disable brownout problems
 #include <WiFi.h>
-#include <ESPAsyncWebServer.h>
 #include "mqttwrapper.h"
 #include <EspCam.h>
-#include "elegantOTAWrapper.h"
 #include <settings.h>
+//#include <ArduinoOTA.h>
 
-AsyncWebServer server(80);
 MqttWrapper pubSubClient;
 EspCam cam;
-ElegantOTAWrapper elegantOTA(&server);
 Settings settings;
 
 unsigned long lastPhotoTaken = millis();
 
-void initWifi()
+void connectWifi()
 {
   // Wi-Fi connection
   WiFi.begin(settings.wifiSsid, settings.wifiPassword);
@@ -49,6 +30,11 @@ void initWifi()
   Serial.println("WiFi connected");
 }
 
+void disconnectWifi()
+{
+  WiFi.disconnect();
+}
+
 void setup()
 {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
@@ -56,22 +42,52 @@ void setup()
   Serial.begin(9600);
   Serial.setDebugOutput(false);
 
-  initWifi();
-  elegantOTA.setup();
   cam.Setup();
 
-  server.begin();
-  Serial.println("HTTP server started");
+ /*  ArduinoOTA
+      .onStart([]()
+               {
+      String type;
+      if (ArduinoOTA.getCommand() == U_FLASH) {
+        type = "sketch";
+      } else {  // U_SPIFFS
+        type = "filesystem";
+      }
+
+      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+      Serial.println("Start updating " + type); })
+      .onEnd([]()
+             { Serial.println("\nEnd"); })
+      .onProgress([](unsigned int progress, unsigned int total)
+                  { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); })
+      .onError([](ota_error_t error)
+               {
+      Serial.printf("Error[%u]: ", error);
+      if (error == OTA_AUTH_ERROR) {
+        Serial.println("Auth Failed");
+      } else if (error == OTA_BEGIN_ERROR) {
+        Serial.println("Begin Failed");
+      } else if (error == OTA_CONNECT_ERROR) {
+        Serial.println("Connect Failed");
+      } else if (error == OTA_RECEIVE_ERROR) {
+        Serial.println("Receive Failed");
+      } else if (error == OTA_END_ERROR) {
+        Serial.println("End Failed");
+      } });
+
+  ArduinoOTA.begin(); */
 }
 
 void loop()
 {
   unsigned long now = millis();
-  elegantOTA.loop();
 
   if (now - lastPhotoTaken > settings.delayTime)
   {
     Photo photo = cam.CaptureFrame();
+
+    connectWifi();
+
     if (pubSubClient.Connect())
     {
       if (photo.length > 0)
@@ -82,15 +98,18 @@ void loop()
       else
       {
         pubSubClient.Publish("log", "Unable to take photo...");
+        // ESP.restart();
       }
 
       pubSubClient.Disconnect();
     }
 
+    disconnectWifi();
+
     lastPhotoTaken = now;
   }
 
   pubSubClient.Loop();
-
+  //ArduinoOTA.handle();
   delay(1);
 }

@@ -3,7 +3,7 @@
 
 #include "Arduino.h"
 
-typedef struct Photo
+struct Photo
 {
     size_t length = 0;
     uint8_t *buffer = nullptr;
