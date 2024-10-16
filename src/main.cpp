@@ -1,8 +1,8 @@
 #include <WiFi.h>
 #include "esp_timer.h"
 #include "img_converters.h"
-// #include "FS.h"     // SD Card ESP32
-// #include "SD_MMC.h" // SD Card ESP32
+//#include "FS.h"     // SD Card ESP32
+//#include "SD_MMC.h" // SD Card ESP32
 #include "fb_gfx.h"
 #include "soc/soc.h"          //disable brownout problems
 #include "soc/rtc_cntl_reg.h" //disable brownout problems
@@ -29,12 +29,14 @@ void log(const String message);
 Photo *takePhoto();
 void setupCamera();
 void setupPubSub();
+//void setupSD();
 
 void setup()
 {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); // disable brownout detector
   setupCamera();
   setupPubSub();
+  //setupSD();
 
   Serial.begin(9600);
   Serial.setDebugOutput(false);
@@ -49,17 +51,23 @@ void loop()
     Photo *photo = takePhoto();
     connectWifi();
 
-    if (photo->length > 0)
+    if (connectPubSub())
     {
-      log("Sending photo...");
-      publishPhoto(photo);
-    }
-    else
-    {
-      log("Unable to take photo...");
+      if (photo->length > 0)
+      {
+        log("Sending photo...");
+        Serial.println("Sending photo...");
+        publishPhoto(photo);
+      }
+      else
+      {
+        log("Unable to take photo...");
+        Serial.println("Unable to take photo...");
+      }
+
+      pubSubClient.disconnect();
     }
 
-    pubSubClient.disconnect();
     disconnectWifi();
 
     lastPhotoTaken = now;
@@ -68,6 +76,23 @@ void loop()
   pubSubClient.loop();
   delay(1);
 }
+
+/* void setupSD()
+{
+  Serial.println("Starting SD Card");
+  if (!SD_MMC.begin())
+  {
+    Serial.println("SD Card Mount Failed");
+    return;
+  }
+
+  uint8_t cardType = SD_MMC.cardType();
+  if (cardType == CARD_NONE)
+  {
+    Serial.println("No SD Card attached");
+    return;
+  }
+} */
 
 void setupPubSub()
 {
@@ -95,9 +120,6 @@ void disconnectWifi()
 
 bool connectPubSub()
 {
-  if (!WiFi.isConnected())
-    return false;
-
   while (!pubSubClient.connected())
   {
     Serial.println("Connecting to message broker...");
@@ -122,39 +144,35 @@ char *createTopic(String topic)
 
 void publishPhoto(Photo *photo)
 {
-  if (connectPubSub())
+  char *topicBuffer = createTopic("snapshot");
+
+  log("Sending payload to: " + String(topicBuffer));
+  pubSubClient.beginPublish(topicBuffer, photo->length, false);
+
+  size_t res;
+  uint32_t offset = 0;
+  uint32_t to_write = photo->length;
+  uint32_t buf_len;
+  do
   {
-    char *topicBuffer = createTopic("snapshot");
+    buf_len = to_write;
+    if (buf_len > 64000)
+      buf_len = 64000;
 
-    log("Sending payload to: " + String(topicBuffer));
-    pubSubClient.beginPublish(topicBuffer, photo->length, false);
+    log("Sending bytes " + String(offset + buf_len) + "/" + String(to_write));
+    res = pubSubClient.write(photo->buffer + offset, buf_len);
 
-    size_t res;
-    uint32_t offset = 0;
-    uint32_t to_write = photo->length;
-    uint32_t buf_len;
+    offset += buf_len;
+    to_write -= buf_len;
 
-    do
-    {
-      buf_len = to_write;
-      if (buf_len > 64000)
-        buf_len = 64000;
+  } while (res == buf_len && to_write > 0);
 
-      log("Sending bytes " + String(offset + buf_len) + "/" + String(photo->length));
-      res = pubSubClient.write(photo->buffer + offset, buf_len);
+  bool published = pubSubClient.endPublish();
 
-      offset += buf_len;
-      to_write -= buf_len;
+  if (!published)
+    log("Unable to send photo through mq...");
 
-    } while (res == buf_len && to_write > 0);
-
-    bool published = pubSubClient.endPublish();
-
-    if (!published)
-      log("Unable to send photo through mq...");
-
-    free(topicBuffer);
-  }
+  free(topicBuffer);
 }
 
 void log(const String message)
@@ -164,10 +182,8 @@ void log(const String message)
   char *payloadBuffer = (char *)malloc(message.length() + sizeof(char *));
   message.toCharArray(payloadBuffer, message.length() + sizeof(char *));
 
-/*   if (connectPubSub())
-  {
+  if (connectPubSub())
     pubSubClient.publish(topicBuffer, payloadBuffer, message.length());
-  } */
 
   free(topicBuffer);
   free(payloadBuffer);
@@ -221,20 +237,74 @@ void setupCamera()
 
 Photo *takePhoto()
 {
-  log("Capturing frame...");
+  Serial.println("Capturing frame...");
 
   camera_fb_t *fb = esp_camera_fb_get();
-  log("Got frame");
+  Serial.println("Got frame");
 
+  /* Serial.println("Converting to BMP...");
+  bool converted = fmt2bmp(fb->buf, fb->len, 800, 600, (pixformat_t)PIXFORMAT_RGB565, &photo.buffer, &photo.length);
+  if (!converted)
+  {
+      Serial.println("Unable to create BMP");
+  } */
+
+  // Path where new picture will be saved in SD Card
+  //String path = "/picture.jpg";
   uint8_t *buffer;
   size_t length;
 
   buffer = fb->buf;
   length = fb->len;
 
-  log("Resetting frame buffer...");
+  //fs::FS &fs = SD_MMC;
+  //Serial.printf("Picture file name: %s\n", path.c_str());
+
+  /* File file = fs.open(path.c_str(), FILE_WRITE);
+  if (!file)
+  {
+    Serial.println("Failed to open file in writing mode");
+  }
+  else
+  {
+    buffer = fb->buf;
+    length = fb->len;
+    file.write(fb->buf, fb->len); // payload (image), payload length
+    Serial.printf("Saved file to path: %s\n", path.c_str());
+  }
+  file.close(); */
+
+  Serial.println("Resetting frame buffer...");
   esp_camera_fb_return(fb);
   fb = NULL;
+
+  /* File writtenFile = fs.open(path.c_str(), FILE_READ);
+
+  if(!writtenFile){
+    Serial.println("Failed to open file in read mode");
+  }
+  else {
+    length = writtenFile.size();
+    buffer = (uint8_t*)malloc(sizeof(uint8_t) + length);
+
+    writtenFile.read(buffer, length);
+
+    Serial.printf("Got file: %s\n", path.c_str());
+    Serial.print("Length is: ");
+    Serial.println(length);
+  }
+
+  writtenFile.close();*/
+
+  /* bool jpeg_converted = frame2jpg(fb, 80, &photo.buffer, &photo.length);
+  Serial.println("Resetting frame buffer...");
+  esp_camera_fb_return(fb);
+  fb = NULL;
+  if (!jpeg_converted)
+  {
+      Serial.println("JPEG compression failed");
+      ESP.restart();
+  } */
 
   pPhoto photo = (pPhoto)malloc(sizeof(photo));
   photo->buffer = buffer;
